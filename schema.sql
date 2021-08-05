@@ -57,10 +57,26 @@ CREATE TABLE IF NOT EXISTS units (
   armor_equip TEXT,
   accessory_equip TEXT
 );
+CREATE INDEX IF NOT EXISTS unit_name_idx ON units(unit_name);
+CREATE INDEX IF NOT EXISTS job_class_idx ON units(job_class);
 
 CREATE TABLE IF NOT EXISTS unit_jobskills (
   unit_id TEXT,
   skill_type INTEGER,
   skill_index INTEGER,
   skill_name TEXT
+);
+
+CREATE TABLE IF NOT EXISTS champs (
+  champ_id INTEGER PRIMARY KEY,
+  streak INTEGER,
+  defeat INTEGER,
+  season INTEGER,
+  color TEXT
+);
+
+CREATE TABLE IF NOT EXISTS champ_units (
+  champ_id INTEGER,
+  unit_index INTEGER,
+  unit_id TEXT
 );
