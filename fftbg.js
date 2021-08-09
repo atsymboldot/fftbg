@@ -11,6 +11,8 @@ const FETCH_DELAY = 100;
 
 const tournamentsApi = `https://fftbg.com/api/tournaments?limit=${API_PAGE_SIZE}`;
 const tournamentDetailsApi = 'https://fftbg.com/api/tournament/';
+const latestChampionApi = 'https://fftbg.com/api/champions/?limit=1&sort=latest';
+const championDetailsApi = 'https://fftbg.com/api/champion/';
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -119,6 +121,18 @@ async function insertTournamentDetails(details, db) {
     }
 }
 
+async function insertUnit(unitId, unit, db) {
+    const unitsInsertSql = 'INSERT INTO units (unit_id, unit_name, gender, zodiac_sign, brave, faith, job_class, action_skill, reaction_skill, support_skill, move_skill, mainhand_equip, offhand_equip, head_equip, armor_equip, accessory_equip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    await db.run(unitsInsertSql, unitId, unit.Name, unit.Gender, unit.Sign, unit.Brave, unit.Faith, unit.Class, unit.ActionSkill, unit.ReactionSkill, unit.SupportSkill, unit.MoveSkill, unit.Mainhand, unit.Offhand, unit.Head, unit.Armor, unit.Accessory);
+    const unitJobskillsInsertSql = 'INSERT INTO unit_jobskills (unit_id, skill_type, skill_index, skill_name) VALUES (?, ?, ?, ?)';
+    for (let j = 0; j < unit.ClassSkills.length; j++) {
+        await db.run(unitJobskillsInsertSql, unitId, 1, j, unit.ClassSkills[j]);
+    }
+    for (let j = 0; j < unit.ExtraSkills.length; j++) {
+        await db.run(unitJobskillsInsertSql, unitId, 2, j, unit.ExtraSkills[j]);
+    }
+}
+
 async function fetchTournamentDetails(db) {
     const tournamentsToFetchSql = 'SELECT tournament_id FROM tournaments WHERE tournament_id NOT IN (SELECT tournament_id FROM tournament_units)';
     const results = await db.all(tournamentsToFetchSql);
@@ -136,21 +150,42 @@ async function fetchTournamentDetails(db) {
                 const tournamentUnitsInsertSql = 'INSERT INTO tournament_units (tournament_id, team_name, team_index, unit_id) VALUES (?, ?, ?, ?)';
                 const unitId = `${tid}-${team}-${i}`;
                 await db.run(tournamentUnitsInsertSql, tid, team, i, unitId);
-                const unitsInsertSql = 'INSERT INTO units (unit_id, unit_name, gender, zodiac_sign, brave, faith, job_class, action_skill, reaction_skill, support_skill, move_skill, mainhand_equip, offhand_equip, head_equip, armor_equip, accessory_equip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-                await db.run(unitsInsertSql, unitId, unit.Name, unit.Gender, unit.Sign, unit.Brave, unit.Faith, unit.Class, unit.ActionSkill, unit.ReactionSkill, unit.SupportSkill, unit.MoveSkill, unit.Mainhand, unit.Offhand, unit.Head, unit.Armor, unit.Accessory);
-                const unitJobskillsInsertSql = 'INSERT INTO unit_jobskills (unit_id, skill_type, skill_index, skill_name) VALUES (?, ?, ?, ?)';
-                for (let j = 0; j < unit.ClassSkills.length; j++) {
-                    await db.run(unitJobskillsInsertSql, unitId, 1, j, unit.ClassSkills[j]);
-                }
-                for (let j = 0; j < unit.ExtraSkills.length; j++) {
-                    await db.run(unitJobskillsInsertSql, unitId, 2, j, unit.ExtraSkills[j]);
-                }
+                await insertUnit(unitId, unit, db);
             }
         }
         await db.exec('COMMIT');
         log(`    Finished tournament ${tid}; ${++doneCount} of ${results.length} complete`);
     }
     log(`  Fetch: ${results.length} complete`);
+}
+
+async function getLatestChampion(db) {
+    const latestChampSql = 'SELECT MAX(champ_id) cid FROM champs';
+    const result = await db.get(latestChampSql);
+    return result ? result.cid : 0;
+}
+
+async function fetchLatestChampion() {
+    const response = await fetchJson(latestChampionApi);
+    return response[0].ID;
+}
+
+async function updateChampions(db) {
+    const latestSavedChamp = await getLatestChampion(db);
+    const latestChamp = await fetchLatestChampion();
+    for (let i = latestSavedChamp + 1; i <= latestChamp; i++) {
+        log(`  Fetch: Champ #${i} (up to ${latestChamp})`);
+        const champ = await fetchJson(`${championDetailsApi}${i}`);
+        const insertChampSql = 'INSERT INTO champs (champ_id, streak, defeat, season, color) VALUES (?, ?, ?, ?, ?)';
+        await db.run(insertChampSql, champ.ID, champ.Streak, champ.Defeat, champ.Season, champ.Color);
+        for (let j = 0; j < champ.Teams.Units.length; j++) {
+            const unit = champ.Teams.Units[j];
+            const unitId = `c${i}-champion-${j}`;
+            const insertChampUnitSql = 'INSERT INTO champ_units (champ_id, unit_index, unit_id) VALUES (?, ?, ?)';
+            await db.run(insertChampUnitSql, i, j, unitId);
+            await insertUnit(unitId, unit, db);
+        }
+    }
 }
 
 (async () => {
@@ -161,6 +196,8 @@ async function fetchTournamentDetails(db) {
     await fetchTournamentSummaries(db);
     log('Fetching tournament details from API');
     await fetchTournamentDetails(db);
+    log('Updating champions from API');
+    await updateChampions(db);
     log('Updates complete, closing SQLite connection');
     await db.close();
 })();
