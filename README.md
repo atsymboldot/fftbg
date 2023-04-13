@@ -1,8 +1,13 @@
-TODO
-- import champ data (CHALLENGE: how to uniquely determine the unit_id/tournament-of-origin?)
-- auto-detect meme/non-normal tournaments
-- label tournaments with names when available from API
-- label champ units in explicit column (instead of `unit_id not like "%-champion-%"`)
-- import chargen data (standard "Inserts are:" and doppel "insertMe")
-- attempt to map chargen data to units
-- auto-detect/label raidbosses in units table (organically generated and insert-specified)
+My environment (probably not required, but untested outside of this setup):
+
+- CentOS 7.9
+- Node JS 14.17.0
+- NPM 8.19.1
+- SQLite3 3.36.0
+
+Steps to set up:
+
+- Download the initial copy of fftbg.db to this directory
+- Run `npm install`
+- Run `node fftbg` to update fftbg.db with any new data from fftbg.com
+- Run `sqlite3 fftbg.db` to get an interactive SQL shell for ad-hoc queries

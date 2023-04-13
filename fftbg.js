@@ -1,40 +1,18 @@
-const fetch = require('node-fetch');
 const fs = require('fs');
-const sqlite3 = require('sqlite3');
-const sqlite = require('sqlite');
 
-const LOG_ENABLED = true;
-const DATABASE_PATH = 'fftbg.db';
-const SCHEMA_PATH = 'schema.sql';
+const util = require('./util.js');
+
 const API_PAGE_SIZE = 1000;
-const FETCH_DELAY = 100;
+const SCHEMA_PATH = 'schema.sql';
 
 const tournamentsApi = `https://fftbg.com/api/tournaments?limit=${API_PAGE_SIZE}`;
 const tournamentDetailsApi = 'https://fftbg.com/api/tournament/';
+
+// TODO: this endpoint doesn't always get the last champ; when a new season
+// starts, it is sometimes "stuck" showing the last champ of the ended season
 const latestChampionApi = 'https://fftbg.com/api/champions/?limit=1&sort=latest';
+//const latestChampionApi = 'https://fftbg.com/api/champions/16?limit=1&sort=latest'; // TODO remove constant season when accurate
 const championDetailsApi = 'https://fftbg.com/api/champion/';
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function log(s) {
-    if (LOG_ENABLED) {
-        console.error(s);
-    }
-}
-
-async function fetchJson(url) {
-    await sleep(FETCH_DELAY);
-    return (await fetch(url)).json();
-}
-
-async function dbConnect() {
-    return sqlite.open({
-        filename: DATABASE_PATH,
-        driver: sqlite3.Database
-    });
-}
 
 async function createTables(db) {
     const createSql = fs.readFileSync(SCHEMA_PATH, 'utf8').split(';');
@@ -87,7 +65,7 @@ async function addTournament(tournament, db) {
         return false;
     }
 
-    log(`    Populating summary data for tournament ${tournament.ID}`);
+    util.log(`    Populating summary data for tournament ${tournament.ID}`);
     await insertTournament(tournament, db);
     return true;
 }
@@ -96,8 +74,8 @@ async function fetchTournamentSummaries(db) {
     let last = 0;
     for (let i = 0; last != -1; i++) {
         const fetchUrl = last == 0 ? tournamentsApi : `${tournamentsApi}&before=${last}`;
-        const summaries = await fetchJson(fetchUrl);
-        log(`  Fetch: ${fetchUrl} returned ${summaries.length} results.`);
+        const summaries = await util.fetchJson(fetchUrl);
+        util.log(`  Fetch: ${fetchUrl} returned ${summaries.length} results.`);
         last = -1;
         for (const tournament of summaries) {
             await db.exec('BEGIN');
@@ -136,27 +114,27 @@ async function insertUnit(unitId, unit, db) {
 async function fetchTournamentDetails(db) {
     const tournamentsToFetchSql = 'SELECT tournament_id FROM tournaments WHERE tournament_id NOT IN (SELECT tournament_id FROM tournament_units)';
     const results = await db.all(tournamentsToFetchSql);
-    log(`  Fetch: ${results.length} tournaments queued for update`);
+    util.log(`  Fetch: ${results.length} tournaments queued for update`);
     let doneCount = 0;
     for (const row of results) {
         await db.exec('BEGIN');
         const tid = row.tournament_id;
         const fetchUrl = `${tournamentDetailsApi}${tid}`;
-        const details = await fetchJson(fetchUrl);
+        const details = await util.fetchJson(fetchUrl);
         await insertTournamentDetails(details, db);
         for (const team of Object.keys(details.Teams)) {
             for (let i = 0; i < details.Teams[team].Units.length; i++) {
                 const unit = details.Teams[team].Units[i];
-                const tournamentUnitsInsertSql = 'INSERT INTO tournament_units (tournament_id, team_name, team_index, unit_id) VALUES (?, ?, ?, ?)';
+                const tournamentUnitsInsertSql = 'INSERT INTO tournament_units (tournament_id, team_name, unit_index, unit_id) VALUES (?, ?, ?, ?)';
                 const unitId = `${tid}-${team}-${i}`;
                 await db.run(tournamentUnitsInsertSql, tid, team, i, unitId);
                 await insertUnit(unitId, unit, db);
             }
         }
         await db.exec('COMMIT');
-        log(`    Finished tournament ${tid}; ${++doneCount} of ${results.length} complete`);
+        util.log(`    Finished tournament ${tid}; ${++doneCount} of ${results.length} complete`);
     }
-    log(`  Fetch: ${results.length} complete`);
+    util.log(`  Fetch: ${results.length} complete`);
 }
 
 async function getLatestChampion(db) {
@@ -166,7 +144,7 @@ async function getLatestChampion(db) {
 }
 
 async function fetchLatestChampion() {
-    const response = await fetchJson(latestChampionApi);
+    const response = await util.fetchJson(latestChampionApi);
     return response[0].ID;
 }
 
@@ -174,12 +152,12 @@ async function updateChampions(db) {
     const latestSavedChamp = await getLatestChampion(db);
     const latestChamp = await fetchLatestChampion();
     for (let i = latestSavedChamp + 1; i <= latestChamp; i++) {
-        log(`  Fetch: Champ #${i} (up to ${latestChamp})`);
-        const champ = await fetchJson(`${championDetailsApi}${i}`);
+        util.log(`  Fetch: Champ #${i} (up to ${latestChamp})`);
+        const champ = await util.fetchJson(`${championDetailsApi}${i}`);
         const insertChampSql = 'INSERT INTO champs (champ_id, streak, defeat, season, color) VALUES (?, ?, ?, ?, ?)';
         await db.run(insertChampSql, champ.ID, champ.Streak, champ.Defeat, champ.Season, champ.Color);
-        for (let j = 0; j < champ.Teams.Units.length; j++) {
-            const unit = champ.Teams.Units[j];
+        for (let j = 0; j < champ.Team.Units.length; j++) {
+            const unit = champ.Team.Units[j];
             const unitId = `c${i}-champion-${j}`;
             const insertChampUnitSql = 'INSERT INTO champ_units (champ_id, unit_index, unit_id) VALUES (?, ?, ?)';
             await db.run(insertChampUnitSql, i, j, unitId);
@@ -189,15 +167,15 @@ async function updateChampions(db) {
 }
 
 (async () => {
-    log('Initializing SQLite');
-    const db = await dbConnect();
+    util.log('Initializing SQLite');
+    const db = await util.dbConnect();
     await createTables(db);
-    log('Fetching tournament summaries from API');
+    util.log('Fetching tournament summaries from API');
     await fetchTournamentSummaries(db);
-    log('Fetching tournament details from API');
+    util.log('Fetching tournament details from API');
     await fetchTournamentDetails(db);
-    log('Updating champions from API');
+    util.log('Updating champions from API');
     await updateChampions(db);
-    log('Updates complete, closing SQLite connection');
+    util.log('Updates complete, closing SQLite connection');
     await db.close();
 })();
