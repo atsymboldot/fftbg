@@ -11,3 +11,4 @@ Steps to set up:
 - Run `npm install`
 - Run `node fftbg` to update fftbg.db with any new data from fftbg.com
 - Run `sqlite3 fftbg.db` to get an interactive SQL shell for ad-hoc queries
+- Run `node mark-memes` to generate a list of meme tournaments
