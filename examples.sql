@@ -43,6 +43,17 @@ SELECT champ_id, job_class, COUNT(1) ct
 FROM cunits
 GROUP BY 1, 2 HAVING COUNT(1) = 4;
 
+/* Rank jobs by sum-of-streak within a season (equivalent to !stats command in-stream) */
+SELECT
+    rank() OVER win AS rank,
+    job_class,
+    SUM(streak) times
+FROM cunits
+WHERE season = 16
+GROUP BY job_class
+WINDOW win AS (ORDER BY SUM(streak) DESC)
+ORDER BY rank;
+
 /* Players who have been to ToC at least 4 times (excluding current season) */
 SELECT
   LOWER(unit_name) uname,
